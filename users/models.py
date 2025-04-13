@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
+from users.firebase_helpers import firebase_config
+from firebase_admin import auth
 
 # Create your models here.
 class CustomUserManager(BaseUserManager):
@@ -19,6 +21,23 @@ class CustomUserManager(BaseUserManager):
     def create_superuser(self, username, email, password, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
+
+        # Tạo user trên Firebase Authentication
+        firebase_config()
+        try:
+            user_record = auth.create_user(
+                email=email,
+                password=password,
+                display_name=username
+            )
+
+            # Gán custom claims cho admin
+            auth.set_custom_user_claims(user_record.uid, {'role': 'admin'})
+        except Exception as e:
+            print(f"Firebase error during superuser creation: {e}")
+            raise ValueError("Không thể tạo tài khoản Firebase.")
+
+        # Tạo user trong Django
         return self.create_user(username=username, email=email, password=password, role='admin', **extra_fields)
         
    
@@ -35,7 +54,7 @@ class MyUser(AbstractBaseUser, PermissionsMixin):
         ('admin', 'Admin'),
         ('user', 'User'),
     )
-    
+    id = models.CharField(max_length=255, primary_key=True)
     username = models.CharField(max_length=20, unique=True)
     email = models.EmailField(unique=True)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
@@ -52,6 +71,6 @@ class MyUser(AbstractBaseUser, PermissionsMixin):
     
     def __str__(self):
         return self.email
-    
-    
-    
+
+
+

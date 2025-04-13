@@ -1,8 +1,10 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
-from django.contrib.auth import get_user_model, authenticate
-import re
-from users.utils import *
+from django.contrib.auth import get_user_model
+import requests
+from users.firebase_helpers import firebase_config
+from firebase_admin import auth
+from users.utils import sync_firebase_users
 
 User = get_user_model()
 
@@ -18,17 +20,37 @@ class UserLoginForm(forms.Form):
         email = self.cleaned_data['email']
         password = self.cleaned_data['password']
         
-        user = authenticate(email=email, password=password)
-        if not user:
-            raise forms.ValidationError('Invalid email or password.')
-        
-        self.user = user
-        
-        return super().clean()
-    
-    
+        if not email or not password:
+            raise forms.ValidationError("Email and password are required.")
+
+        data = {
+            "email": email,
+            "password": password,
+            "returnSecureToken": True
+        }
+
+
+        API_KEY = "AIzaSyC0d3a8cnrFZIG9tXeEMINjeBzkZKyIvIw"
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={API_KEY}"
+        response = requests.post(url, json=data)
+
+        if response.status_code == 200:
+            res_data = response.json()
+            firebase_uid = res_data['localId']
+
+            # Đồng bộ user từ Firebase về Django
+            user_obj = sync_firebase_users(email=email)
+            if not user_obj:
+                raise forms.ValidationError("Không thể đồng bộ người dùng từ Firebase.")
+            self.user = user_obj
+        else:
+            error_message = response.json().get('error', {}).get('message', 'Email hoặc mật khẩu không đúng.')
+            raise forms.ValidationError(error_message)
+
+
     def get_user(self):
-        return self.user
+        return self.user  
+    
     
     
 class UserRegisterForm(UserCreationForm):
@@ -46,7 +68,6 @@ class UserRegisterForm(UserCreationForm):
         model = User
         fields = ['email', 'password1', 'password2']
         
-    
 
     def save(self, commit=True):
         firebase_config()
